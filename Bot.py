@@ -13,6 +13,7 @@ from database import (
     update_stock,
     delete_product,
     add_image_column,
+    add_description_column,
     cancel_order
 )
 
@@ -165,7 +166,7 @@ async def menu_handler(
 
         button2 = InlineKeyboardButton(
             text="❌ انصراف",
-            callback_data=f"cancel_{product_id}"
+            callback_data=f"cancel_{product_id}_{confirmation_id}"
         )
 
         keyboard = [[button1, button2]]
@@ -190,6 +191,7 @@ async def menu_handler(
             "edit_product_id",
             "edit_product_name",
             "edit_product_model",
+            "edit_product_description",
             "edit_product_price",
             "edit_product_stock",
         ):
@@ -211,6 +213,7 @@ async def menu_handler(
             context.user_data.pop("edit_product_id", None)
             context.user_data.pop("edit_product_name", None)
             context.user_data.pop("edit_product_model", None)
+            context.user_data.pop("edit_product_description", None)
             context.user_data.pop("edit_product_price", None)
             context.user_data.pop("edit_product_stock", None)
 
@@ -624,15 +627,32 @@ async def menu_handler(
        return
     
     if context.user_data.get("admin_step") == "edit_product_model":
-       new_model = text.strip()
+        new_model = text.strip()
 
-       context.user_data["edit_product_model"] = new_model
-       context.user_data["admin_step"] = "edit_product_price"
+        context.user_data["edit_product_model"] = new_model
+        context.user_data["admin_step"] = "edit_product_description"
 
-       await update.message.reply_text(
-          "قیمت جدید محصول رو به تومان وارد کن:"
-       )
-       return
+        await update.message.reply_text(
+            "توضیحات جدید محصول رو وارد کن:"
+        )
+        return
+
+    if context.user_data.get("admin_step") == "edit_product_description":
+        new_description = text.strip()
+
+        if not new_description:
+            await update.message.reply_text(
+                "توضیحات نمی‌تونه خالی باشه. دوباره وارد کن:"
+            )
+            return
+
+        context.user_data["edit_product_description"] = new_description
+        context.user_data["admin_step"] = "edit_product_price"
+
+        await update.message.reply_text(
+            "قیمت جدید محصول رو به تومان وارد کن:"
+        )
+        return
 
     if context.user_data.get("admin_step") == "edit_product_price":
         try:
@@ -658,42 +678,49 @@ async def menu_handler(
         return
 
     if context.user_data.get("admin_step") == "edit_product_stock":
-       try:
-           new_stock = int(text)
+        try:
+            new_stock = int(text)
 
-           if new_stock < 0:
-              raise ValueError
+            if new_stock < 0:
+                raise ValueError
 
-       except ValueError:
-           await update.message.reply_text(
-              "موجودی باید عدد صحیح و صفر یا بیشتر باشه. دوباره وارد کن:"
-           )
-           return
+        except ValueError:
+            await update.message.reply_text(
+                "موجودی باید عدد صحیح و صفر یا بیشتر باشه. دوباره وارد کن:"
+            )
+            return
 
-       product_id = context.user_data.get("edit_product_id")
-       new_name = context.user_data.get("edit_product_name")
-       new_model = context.user_data.get("edit_product_model")
-       new_price = context.user_data.get("edit_product_price")
+        product_id = context.user_data.get("edit_product_id")
+        new_name = context.user_data.get("edit_product_name")
+        new_model = context.user_data.get("edit_product_model")
+        new_description = context.user_data.get("edit_product_description")
+        new_price = context.user_data.get("edit_product_price")
 
-       update_product_info(product_id, new_name, new_model)
-       update_product_price(product_id, new_price)
-       update_stock(product_id, new_stock)
+        update_product_info(
+            product_id,
+            new_name,
+            new_model,
+            new_description
+        )
 
-       for key in [
-          "edit_product_id",
-          "edit_product_name",
-          "edit_product_model",
-          "edit_product_price",
-          "edit_product_stock",
-          "admin_step"
-       ]:
-          context.user_data.pop(key, None)
+        update_product_price(product_id, new_price)
+        update_stock(product_id, new_stock)
 
-       await update.message.reply_text(
-          "✅ اطلاعات محصول با موفقیت ویرایش شد."
-       )
-       return
- 
+        for key in [
+            "edit_product_id",
+            "edit_product_name",
+            "edit_product_model",
+            "edit_product_description",
+            "edit_product_price",
+            "edit_product_stock",
+            "admin_step"
+        ]:
+            context.user_data.pop(key, None)
+
+        await update.message.reply_text(
+            "✅ اطلاعات محصول با موفقیت ویرایش شد."
+        )
+        return
     
     if context.user_data.get("admin_step") == "product_name":
        product_name = text.strip()
@@ -715,12 +742,38 @@ async def menu_handler(
        )
        return
 
-    
     if context.user_data.get("admin_step") == "product_model":
         product_model = text.strip()
 
         context.user_data["new_product"]["model"] = product_model
-  
+
+        context.user_data["admin_step"] = "product_description"
+
+        keyboard = [
+            [KeyboardButton("بدون توضیحات")]
+        ]
+
+        reply_markup = ReplyKeyboardMarkup(
+            keyboard,
+            resize_keyboard=True
+        )
+
+        await update.message.reply_text(
+            "توضیحات محصول رو وارد کن یا برای رد کردن این مرحله روی «بدون توضیحات» بزن:",
+            reply_markup=reply_markup
+        )
+        return
+
+
+    if context.user_data.get("admin_step") == "product_description":
+
+        if text == "بدون توضیحات":
+            product_description = None
+        else:
+            product_description = text.strip()
+
+        context.user_data["new_product"]["description"] = product_description
+
         context.user_data["admin_step"] = "product_image"
 
         keyboard = [
@@ -730,7 +783,7 @@ async def menu_handler(
         reply_markup = ReplyKeyboardMarkup(
             keyboard,
             resize_keyboard=True
-        )
+        )       
 
         await update.message.reply_text(
             "📸 عکس محصول رو ارسال کن.\n"
@@ -816,7 +869,8 @@ async def menu_handler(
           new_product["model"],
           new_product["price"],
           new_product["stock"],
-          new_product.get("image_file_id")
+          new_product.get("image_file_id"),
+          new_product.get("description")
        )
 
        context.user_data.pop("new_product", None)
@@ -847,9 +901,9 @@ async def menu_handler(
 
     elif text == "☎️ پشتیبانی":
         await update.message.reply_text(
-            "☎️ بخش پشتیبانی\n\n"
-            "برای ارتباط با پشتیبانی با ما در تماس باشید."
-       )
+            "☎️ پشتیبانی فروشگاه\n\n"
+            "اطلاعات تماس با پشتیبانی هنوز توسط مدیریت فروشگاه تنظیم نشده است."
+        )
         
 async def products(
     update: Update,
@@ -871,11 +925,16 @@ async def products(
         stock = product[3]
         model = product[4]
         image_file_id = product[5]
+        description = product[6]
+        
 
         message = f"🛍️ {name}\n"
 
         if model is not None:
             message += f"مدل: {model}\n"
+
+        if description:
+            message += f"توضیحات: {description}\n"
 
         message += f"قیمت: {price:,} تومان\n"
 
@@ -974,6 +1033,7 @@ async def button_handler(
             return
 
         context.user_data["pending_order_product_id"] = product_id
+        context.user_data["pending_order_chat_id"] = query.message.chat_id
         context.user_data["order_step"] = "quantity"
 
         await query.message.reply_text(
@@ -1028,11 +1088,15 @@ async def button_handler(
         pending_confirmation_id = context.user_data.get(
            "pending_confirmation_id"
         )
+        pending_chat_id = context.user_data.get(
+            "pending_order_chat_id"
+        )
 
         if (
            product_id != pending_product_id
            or quantity != pending_quantity
            or confirmation_id != pending_confirmation_id
+           or pending_chat_id != query.message.chat_id
         ):
            await query.message.reply_text(
                "این درخواست معتبر نیست یا قبلاً پردازش شده است. ❌"
@@ -1081,11 +1145,24 @@ async def button_handler(
             await query.message.reply_text(
                 "هنگام ثبت سفارش خطایی رخ داد. لطفاً بعداً دوباره تلاش کنید. ❌"
             )
+            return
 
+        else:
+            logging.error(
+                "Unexpected create_order result: %r",
+                success
+            )
+            await query.message.reply_text(
+                "نتیجه ثبت سفارش نامشخص است. لطفاً بعداً دوباره تلاش کنید. ❌"
+            )
+            return
+        
         context.user_data.pop("pending_order_product_id", None)
         context.user_data.pop("pending_order_quantity", None)
         context.user_data.pop("pending_confirmation_id", None)
+        context.user_data.pop("pending_order_chat_id", None)
         context.user_data.pop("order_step", None)
+        
 
         await query.edit_message_reply_markup(
            reply_markup=None
@@ -1231,26 +1308,56 @@ async def button_handler(
     
     elif data.startswith("cancel_"):
 
-        try:
-            product_id = int(data.split("_", 1)[1])
-        except (ValueError, IndexError):
+        parts = data.split("_")
+
+        if len(parts) != 3:
             await query.message.reply_text(
                 "درخواست لغو خرید نامعتبر است. ❌"
+            )
+            return
+
+        try:
+            product_id = int(parts[1])
+        except ValueError:
+            await query.message.reply_text(
+                "درخواست لغو خرید نامعتبر است. ❌"
+            )
+            return
+
+        confirmation_id = parts[2]
+
+        if (
+            product_id <= 0
+            or len(confirmation_id) != 32
+            or any(
+                char not in "0123456789abcdef"
+                for char in confirmation_id
+            )
+        ):
+            await query.message.reply_text(
+                "اطلاعات لغو خرید نامعتبر است. ❌"
             )
             return
 
         if (
             context.user_data.get("order_step") != "confirm"
             or context.user_data.get("pending_order_product_id") != product_id
+            or context.user_data.get("pending_confirmation_id") != confirmation_id
+            or context.user_data.get("pending_order_chat_id") != query.message.chat_id
         ):
             await query.message.reply_text(
                 "این درخواست لغو معتبر نیست یا منقضی شده است. ❌"
             )
-            return
+        
+            await query.edit_message_reply_markup(
+                reply_markup=None
+            )
+            return 
 
         context.user_data.pop("pending_order_product_id", None)
         context.user_data.pop("pending_order_quantity", None)
         context.user_data.pop("pending_confirmation_id", None)
+        context.user_data.pop("pending_order_chat_id", None)
         context.user_data.pop("order_step", None)
 
         await query.message.reply_text(
@@ -1262,6 +1369,8 @@ async def button_handler(
         )
 
         return
+
+
     
         
 def main():
@@ -1273,6 +1382,8 @@ def main():
     create_table()
 
     add_image_column()
+
+    add_description_column()
 
     app = Application.builder().token(token).build()
     app.add_handler(CommandHandler("start", start))

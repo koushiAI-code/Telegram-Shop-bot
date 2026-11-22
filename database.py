@@ -140,19 +140,20 @@ def get_available_products():
     return products
 
 
-
 def update_stock(product_id, new_stock):
 
-    if not isinstance(product_id, int) or product_id <= 0:
+    if type(product_id) is not int or product_id <= 0:
         return "invalid_product_id"
 
-    if not isinstance(new_stock, int) or new_stock < 0:
+    if type(new_stock) is not int or new_stock < 0:
         return "invalid_stock"
 
     connection = connect_db()
 
     try:
         cursor = connection.cursor()
+
+        cursor.execute("BEGIN IMMEDIATE")
 
         cursor.execute("""
             UPDATE products
@@ -190,79 +191,133 @@ def get_product_by_id(product_id):
     return product
 
 def delete_product(product_id):
+    if type(product_id) is not int or product_id <= 0:
+        return "invalid_product_id"
+
     connection = connect_db()
-    cursor = connection.cursor()
 
-    cursor.execute("""
-        SELECT id
-        FROM orders
-        WHERE product_id = ?
-        LIMIT 1
-    """, (product_id,))
+    try:
+        cursor = connection.cursor()
 
-    order = cursor.fetchone()
+        cursor.execute("BEGIN IMMEDIATE")
 
-    if order:
+        cursor.execute("""
+            SELECT id
+            FROM orders
+            WHERE product_id = ?
+            LIMIT 1
+        """, (product_id,))
+
+        order = cursor.fetchone()
+
+        if order:
+            connection.rollback()
+            return "has_orders"
+
+        cursor.execute("""
+            DELETE FROM products
+            WHERE id = ?
+        """, (product_id,))
+
+        deleted = cursor.rowcount
+
+        connection.commit()
+
+        return deleted
+
+    except sqlite3.Error:
+        connection.rollback()
+        raise
+
+    finally:
         connection.close()
-        return "has_orders"
-
-    cursor.execute("""
-        DELETE FROM products
-        WHERE id = ?
-    """, (product_id,))
-
-    deleted = cursor.rowcount
-
-    connection.commit()
-    connection.close()
-
-    return deleted
 
 def update_product_price(product_id, new_price):
+    if type(product_id) is not int or product_id <= 0:
+        return "invalid_product_id"
+
+    if type(new_price) is not int or new_price < 0:
+        return "invalid_price"
+
     connection = connect_db()
-    cursor = connection.cursor()
 
-    cursor.execute(
-        """
-        UPDATE products
-        SET price = ?
-        WHERE id = ?
-        """,
-        (new_price, product_id)
-    )
+    try:
+        cursor = connection.cursor()
 
-    updated = cursor.rowcount
+        cursor.execute("BEGIN IMMEDIATE")
 
-    connection.commit()
-    connection.close()
+        cursor.execute("""
+            UPDATE products
+            SET price = ?
+            WHERE id = ?
+        """, (new_price, product_id))
 
-    return updated
+        updated = cursor.rowcount
+
+        connection.commit()
+
+        return updated
+
+    except sqlite3.Error:
+        connection.rollback()
+        raise
+
+    finally:
+        connection.close()
 
 def update_product_info(product_id, new_name, new_model):
+    if type(product_id) is not int or product_id <= 0:
+        return "invalid_product_id"
+
+    if not isinstance(new_name, str) or not new_name.strip():
+        return "invalid_name"
+
+    if not isinstance(new_model, str) or not new_model.strip():
+        return "invalid_model"
+
     connection = connect_db()
-    cursor = connection.cursor()
 
-    cursor.execute(
-        """
-        UPDATE products
-        SET name = ?, model = ?
-        WHERE id = ?
-        """,
-        (new_name, new_model, product_id)
-    )
+    try:
+        cursor = connection.cursor()
 
-    updated = cursor.rowcount
+        cursor.execute("BEGIN IMMEDIATE")
 
-    connection.commit()
-    connection.close()
+        cursor.execute("""
+            UPDATE products
+            SET name = ?, model = ?
+            WHERE id = ?
+        """, (new_name.strip(), new_model.strip(), product_id))
 
-    return updated
+        updated = cursor.rowcount
 
+        connection.commit()
+
+        return updated
+
+    except sqlite3.Error:
+        connection.rollback()
+        raise
+
+    finally:
+        connection.close()
 
 def create_order(user_id, product_id, quantity, confirmation_id):
 
-    if not isinstance(quantity, int) or quantity <= 0:
+    if type(user_id) is not int or user_id <= 0:
+        return "invalid_user_id"
+
+    if type(product_id) is not int or product_id <= 0:
+        return "invalid_product_id"
+
+    if type(quantity) is not int or quantity <= 0:
         return "invalid_quantity"
+
+    if (
+        not isinstance(confirmation_id, str)
+        or len(confirmation_id) != 32
+        or any(char not in "0123456789abcdef" for char in confirmation_id)
+):
+        return "invalid_confirmation_id"
 
     connection = connect_db()
 
