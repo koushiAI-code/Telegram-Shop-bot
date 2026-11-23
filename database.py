@@ -50,6 +50,26 @@ def add_image_column():
 
     connection.close()
 
+def add_description_column():
+    connection = connect_db()
+
+    try:
+        cursor = connection.cursor()
+
+        cursor.execute("PRAGMA table_info(products)")
+        columns = [column[1] for column in cursor.fetchall()]
+
+        if "description" not in columns:
+            cursor.execute("""
+                ALTER TABLE products
+                ADD COLUMN description TEXT
+            """)
+
+            connection.commit()
+
+    finally:
+        connection.close()
+
 def create_orders_table():
     connection = connect_db()
     cursor = connection.cursor()
@@ -90,26 +110,44 @@ def create_orders_table():
 
 
 
-def add_product(name, model, price, stock, image_file_id=None):
+def add_product(
+    name,
+    model,
+    price,
+    stock,
+    image_file_id=None,
+    description=None
+):
     connection = connect_db()
     cursor = connection.cursor()
 
-    cursor.execute(
-        """
-        INSERT INTO products (
-            name,
-            model,
-            price,
-            stock,
-            image_file_id
+    try:
+        cursor.execute(
+            """
+            INSERT INTO products (
+                name,
+                model,
+                price,
+                stock,
+                image_file_id,
+                description
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                name,
+                model,
+                price,
+                stock,
+                image_file_id,
+                description
+            )
         )
-        VALUES (?, ?, ?, ?, ?)
-        """,
-        (name, model, price, stock, image_file_id)
-    )
 
-    connection.commit()
-    connection.close()
+        connection.commit()
+
+    finally:
+        connection.close()
 
 def get_products():
     connection = connect_db()
@@ -264,8 +302,9 @@ def update_product_price(product_id, new_price):
 
     finally:
         connection.close()
+        
 
-def update_product_info(product_id, new_name, new_model):
+def update_product_info(product_id, new_name, new_model, new_description):
     if type(product_id) is not int or product_id <= 0:
         return "invalid_product_id"
 
@@ -274,6 +313,7 @@ def update_product_info(product_id, new_name, new_model):
 
     if not isinstance(new_model, str) or not new_model.strip():
         return "invalid_model"
+
 
     connection = connect_db()
 
@@ -284,9 +324,14 @@ def update_product_info(product_id, new_name, new_model):
 
         cursor.execute("""
             UPDATE products
-            SET name = ?, model = ?
+            SET name = ?, model = ?, description = ?
             WHERE id = ?
-        """, (new_name.strip(), new_model.strip(), product_id))
+        """, (
+            new_name.strip(),
+            new_model.strip(),
+            new_description.strip() if new_description is not None else None,
+            product_id
+        ))
 
         updated = cursor.rowcount
 

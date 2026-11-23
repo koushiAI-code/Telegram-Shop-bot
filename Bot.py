@@ -23,6 +23,7 @@ from telegram import(
     InlineKeyboardMarkup,
     ReplyKeyboardMarkup,
     KeyboardButton,
+    ReplyKeyboardRemove
 )
 
 from telegram.ext import (
@@ -632,25 +633,48 @@ async def menu_handler(
         context.user_data["edit_product_model"] = new_model
         context.user_data["admin_step"] = "edit_product_description"
 
+        keyboard = [
+            [KeyboardButton("بدون تغییر")],
+            [KeyboardButton("حذف توضیحات")]
+        ]
+
+        reply_markup = ReplyKeyboardMarkup(
+            keyboard,
+            resize_keyboard=True
+        )
+
         await update.message.reply_text(
-            "توضیحات جدید محصول رو وارد کن:"
+            "توضیحات جدید محصول رو وارد کن یا یکی از گزینه‌ها رو انتخاب کن:",
+            reply_markup=reply_markup
         )
         return
 
-    if context.user_data.get("admin_step") == "edit_product_description":
-        new_description = text.strip()
 
-        if not new_description:
-            await update.message.reply_text(
-                "توضیحات نمی‌تونه خالی باشه. دوباره وارد کن:"
-            )
-            return
+    if context.user_data.get("admin_step") == "edit_product_description":
+
+        if text == "بدون تغییر":
+            product_id = context.user_data["edit_product_id"]
+            product = get_product_by_id(product_id)
+            new_description = product[6]
+
+        elif text == "حذف توضیحات":
+            new_description = None
+
+        else:
+            new_description = text.strip()
+
+            if not new_description:
+                await update.message.reply_text(
+                    "توضیحات نمی‌تونه خالی باشه. دوباره وارد کن:"
+                )
+                return
 
         context.user_data["edit_product_description"] = new_description
         context.user_data["admin_step"] = "edit_product_price"
 
         await update.message.reply_text(
-            "قیمت جدید محصول رو به تومان وارد کن:"
+            "قیمت جدید محصول رو به تومان وارد کن:",
+            reply_markup=ReplyKeyboardRemove()
         )
         return
 
@@ -718,7 +742,8 @@ async def menu_handler(
             context.user_data.pop(key, None)
 
         await update.message.reply_text(
-            "✅ اطلاعات محصول با موفقیت ویرایش شد."
+            "✅ اطلاعات محصول با موفقیت ویرایش شد.",
+            reply_markup=admin_menu()
         )
         return
     
