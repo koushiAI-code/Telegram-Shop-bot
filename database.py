@@ -361,7 +361,7 @@ def create_order(user_id, product_id, quantity, confirmation_id):
         not isinstance(confirmation_id, str)
         or len(confirmation_id) != 32
         or any(char not in "0123456789abcdef" for char in confirmation_id)
-):
+    ):
         return "invalid_confirmation_id"
 
     connection = connect_db()
@@ -434,10 +434,15 @@ def create_order(user_id, product_id, quantity, confirmation_id):
     finally:
         connection.close()
 
-def cancel_order(order_id):
 
-    if not isinstance(order_id, int) or order_id <= 0:
+def cancel_order(order_id, user_id=None):
+
+    if type(order_id) is not int or order_id <= 0:
         return "invalid_order_id"
+
+    if user_id is not None:
+        if type(user_id) is not int or user_id <= 0:
+            return "invalid_user_id"
 
     connection = connect_db()
 
@@ -447,7 +452,7 @@ def cancel_order(order_id):
         cursor.execute("BEGIN IMMEDIATE")
 
         cursor.execute("""
-            SELECT product_id, quantity, status
+            SELECT product_id, quantity, status, user_id
             FROM orders
             WHERE id = ?
         """, (order_id,))
@@ -458,7 +463,11 @@ def cancel_order(order_id):
             connection.rollback()
             return "not_found"
 
-        product_id, quantity, status = order
+        product_id, quantity, status, order_user_id = order
+
+        if user_id is not None and order_user_id != user_id:
+            connection.rollback()
+            return "unauthorized"
 
         if not isinstance(quantity, int) or quantity <= 0:
             connection.rollback()
@@ -472,23 +481,31 @@ def cancel_order(order_id):
             connection.rollback()
             return "invalid_status"
 
+        # تلاش برای بازگرداندن موجودی محصول
         cursor.execute("""
             UPDATE products
             SET stock = stock + ?
             WHERE id = ?
         """, (quantity, product_id))
 
-        if cursor.rowcount != 1:
-            connection.rollback()
-            return "product_not_found"
+        product_missing = cursor.rowcount == 0
 
+        # در هر دو حالت، سفارش لغو می‌شود
         cursor.execute("""
             UPDATE orders
             SET status = 'cancelled'
-            WHERE id = ?
+            WHERE id = ? AND status = 'active'
         """, (order_id,))
 
+        if cursor.rowcount != 1:
+            connection.rollback()
+            return "error"
+
         connection.commit()
+
+        if product_missing:
+            return "success_product_missing"
+
         return "success"
 
     except sqlite3.Error:
@@ -498,22 +515,37 @@ def cancel_order(order_id):
     finally:
         connection.close()
 
-def get_user_orders(user_id):
+
+def get_user_orders(user_id, status=None):
     connection = connect_db()
-    cursor = connection.cursor()
 
-    cursor.execute("""
-        SELECT product_name, price, quantity, total_price, created_at
-        FROM orders
-        WHERE user_id = ?
-        ORDER BY id DESC
-    """, (user_id,))
+    try:
+        cursor = connection.cursor()
 
-    orders = cursor.fetchall()
+        if status is None:
+            cursor.execute("""
+                SELECT id, product_name, price, quantity,
+                       total_price, created_at, status
+                FROM orders
+                WHERE user_id = ?
+                ORDER BY id DESC
+            """, (user_id,))
 
-    connection.close()
+        else:
+            cursor.execute("""
+                SELECT id, product_name, price, quantity,
+                       total_price, created_at, status
+                FROM orders
+                WHERE user_id = ? AND status = ?
+                ORDER BY id DESC
+            """, (user_id, status))
 
-    return orders
+        return cursor.fetchall()
+
+    finally:
+        connection.close()
+
+
 
 def get_all_orders():
         connection = connect_db()

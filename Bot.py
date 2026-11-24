@@ -74,6 +74,9 @@ def admin_menu():
         ],
         [
             KeyboardButton("📦 مدیریت موجودی"),
+            KeyboardButton("🔎 بررسی موجودی")
+        ],
+        [
             KeyboardButton("🗑 حذف محصول")
         ],
         [
@@ -245,6 +248,7 @@ async def menu_handler(
         "➕ افزودن محصول",
         "✏️ ویرایش محصول",
         "📦 مدیریت موجودی",
+        "🔎 بررسی موجودی",
         "🗑 حذف محصول",
         "📋 مشاهده سفارش‌ها"
    ]:
@@ -354,9 +358,56 @@ async def menu_handler(
            "شناسه محصول موردنظر رو وارد کن:",
            reply_markup=reply_markup
        )
-
        return
 
+
+    if text == "🔎 بررسی موجودی":
+        all_products = get_products()
+
+        if not all_products:
+            await update.message.reply_text(
+                "هیچ محصولی برای بررسی موجودی وجود نداره.",
+                reply_markup=admin_menu()
+            )
+            return
+
+        message = "📦 گزارش کلی موجودی محصولات:\n\n"
+
+        for product in all_products:
+            product_id = product[0]
+            name = product[1]
+            price = product[2]
+            stock = product[3]
+            model = product[4]
+            description = product[6]
+
+            product_info = (
+                f"شناسه: {product_id}\n"
+                f"نام: {name}\n"
+                f"مدل: {model or 'ثبت نشده'}\n"
+                f"توضیحات: {description or 'ثبت نشده'}\n"
+                f"قیمت: {price:,} تومان\n"
+                f"موجودی فعلی: {stock} عدد\n"
+                "--------------------\n\n"
+            )
+
+            if len(message) + len(product_info) > 4000:
+                await update.message.reply_text(message)
+                message = "📦 ادامه گزارش موجودی:\n\n"
+
+            while len(product_info) > 4000:
+                await update.message.reply_text(product_info[:4000])
+                product_info = product_info[4000:]
+
+            message += product_info
+
+        await update.message.reply_text(
+            message,
+            reply_markup=admin_menu()
+        )
+        return
+
+    
     if context.user_data.get("admin_step") == "stock_product_id":
        try:
           product_id = int(text)
@@ -394,6 +445,7 @@ async def menu_handler(
            await update.message.reply_text(message)
 
        return
+
 
     if text == "🗑 حذف محصول":
        all_products = get_products()
@@ -997,33 +1049,34 @@ async def products(
                 reply_markup=reply_markup
             )
     
+
+
+
 async def myorders(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE
 ):
-    user_id = update.effective_user.id
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                "🟢 سفارش‌های فعال",
+                callback_data="customer_orders_active"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "❌ سفارش‌های لغوشده",
+                callback_data="customer_orders_cancelled"
+            )
+        ]
+    ]
 
-    orders = get_user_orders(user_id)
+    await update.message.reply_text(
+        "📦 سفارش‌های من\n\n"
+        "کدوم دسته از سفارش‌هات رو می‌خوای ببینی؟",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
 
-    if not orders:
-        await update.message.reply_text(
-            "شما هنوز هیچ سفارشی ثبت نکرده‌اید."
-        )
-        return
-
-    message = "📦 سفارش‌های قبلی شما:\n\n"
-
-    for order in orders:
-        message += (
-            f"محصول: {order[0]}\n"
-            f"قیمت واحد: {order[1]:,} تومان\n"
-            f"تعداد: {order[2]}\n"
-            f"مبلغ کل: {order[3]:,} تومان\n"
-            f"تاریخ: {order[4]}\n"
-            "--------------------\n"
-        )
-
-    await update.message.reply_text(message)
 
 async def button_handler(
     update: Update,
@@ -1118,10 +1171,11 @@ async def button_handler(
         )
 
         if (
-           product_id != pending_product_id
-           or quantity != pending_quantity
-           or confirmation_id != pending_confirmation_id
-           or pending_chat_id != query.message.chat_id
+            context.user_data.get("order_step") != "confirm"
+            or product_id != pending_product_id
+            or quantity != pending_quantity
+            or confirmation_id != pending_confirmation_id
+            or pending_chat_id != query.message.chat_id
         ):
            await query.message.reply_text(
                "این درخواست معتبر نیست یا قبلاً پردازش شده است. ❌"
@@ -1164,6 +1218,21 @@ async def button_handler(
         elif success == "invalid_quantity":
             await query.message.reply_text(
                 "تعداد سفارش نامعتبر است. ❌"
+            )
+
+        elif success == "invalid_user_id":
+            await query.message.reply_text(
+            "شناسه کاربری نامعتبر است. ❌"
+        )
+
+        elif success == "invalid_product_id":
+            await query.message.reply_text(
+                "شناسه محصول نامعتبر است. ❌"
+            )
+
+        elif success == "invalid_confirmation_id":
+            await query.message.reply_text(
+                "شناسه تأیید سفارش نامعتبر است. ❌"
             )
 
         elif success == "error":
@@ -1264,6 +1333,67 @@ async def button_handler(
         return
 
 
+    elif data in (
+        "customer_orders_active",
+        "customer_orders_cancelled"
+    ):
+        user_id = query.from_user.id
+
+        if data == "customer_orders_active":
+            status = "active"
+            title = "🟢 سفارش‌های فعال"
+        else:
+            status = "cancelled"
+            title = "❌ سفارش‌های لغوشده"
+
+        orders = get_user_orders(user_id, status)
+
+        if not orders:
+            await query.message.reply_text(
+                f"{title}\n\nهیچ سفارشی در این بخش ندارید."
+            )
+            return
+
+        for order in orders:
+            (
+                order_id,
+                product_name,
+                price,
+                quantity,
+                total_price,
+                created_at,
+                order_status
+            ) = order
+
+            message = (
+                f"🧾 شماره سفارش: {order_id}\n"
+                f"📦 محصول: {product_name}\n"
+                f"💰 قیمت واحد: {price:,} تومان\n"
+                f"🔢 تعداد: {quantity}\n"
+                f"💵 مبلغ کل: {total_price:,} تومان\n"
+                f"🕒 تاریخ: {created_at}\n"
+                f"📌 وضعیت: {'فعال 🟢' if order_status == 'active' else 'لغوشده ❌'}"
+            )
+
+            reply_markup = None
+
+            if order_status == "active":
+                keyboard = [[
+                    InlineKeyboardButton(
+                        "❌ لغو سفارش",
+                        callback_data=f"customer_cancel_order_{order_id}"
+                    )
+                ]]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+
+            await query.message.reply_text(
+                message,
+                reply_markup=reply_markup
+            )
+
+        return
+
+
     elif data.startswith("admin_cancel_order_"):
         if not is_admin(query.from_user.id):
             await query.message.reply_text("⛔ دسترسی غیرمجاز.")
@@ -1291,6 +1421,13 @@ async def button_handler(
         if result == "success":
             await query.edit_message_text(
                 query.message.text + "\n\n❌ وضعیت: لغوشده"
+            )
+
+        elif result == "success_product_missing":
+            await query.edit_message_text(
+                query.message.text
+                + "\n\n📌 وضعیت سفارش: لغوشده ❌"
+                + "\n⚠️ محصول قبلاً حذف شده بود؛ بنابراین موجودی قابل بازگرداندن نبود."
             )
 
         elif result == "already_cancelled":
@@ -1330,6 +1467,92 @@ async def button_handler(
             )
         
         return
+
+
+    elif data.startswith("customer_cancel_order_"):
+        try:
+            order_id = int(data.rsplit("_", 1)[1])
+        except (ValueError, IndexError):
+            await query.message.reply_text(
+                "شناسه سفارش نامعتبر است. ❌"
+            )
+            return
+
+        if order_id <= 0:
+            await query.message.reply_text(
+                "شناسه سفارش نامعتبر است. ❌"
+            )
+            return
+
+        user_id = query.from_user.id
+
+        try:
+            result = cancel_order(order_id, user_id)
+
+        except Exception:
+            logging.exception("Error while cancelling customer order")
+            result = "error"
+
+        if result == "success":
+            await query.edit_message_text(
+                query.message.text
+                + "\n\n📌 وضعیت سفارش: لغوشده ❌"
+                + "\nموجودی محصول به انبار بازگردانده شد."
+            )
+
+        elif result == "success_product_missing":
+            await query.edit_message_text(
+                query.message.text
+                + "\n\n📌 وضعیت سفارش: لغوشده ❌"
+                + "\n⚠️ محصول قبلاً حذف شده بود؛ بنابراین موجودی قابل بازگرداندن نبود."
+            )
+
+        elif result == "already_cancelled":
+            await query.edit_message_reply_markup(
+                reply_markup=None
+            )
+            await query.message.reply_text(
+                "این سفارش قبلاً لغو شده است."
+            )
+
+        elif result in ("not_found", "unauthorized"):
+            await query.edit_message_reply_markup(
+                reply_markup=None
+            )
+            await query.message.reply_text(
+                "سفارش پیدا نشد یا متعلق به شما نیست. ❌"
+            )
+
+        elif result in ("invalid_order_id", "invalid_user_id"):
+            await query.message.reply_text(
+                "اطلاعات سفارش نامعتبر است. ❌"
+            )
+
+        elif result == "product_not_found":
+            await query.edit_message_reply_markup(
+                reply_markup=None
+            )
+            await query.message.reply_text(
+                "محصول سفارش در دیتابیس پیدا نشد؛ موجودی بازنگشت. ❌"
+            )
+
+        elif result == "invalid_status":
+            await query.message.reply_text(
+                "وضعیت سفارش اجازه لغو آن را نمی‌دهد. ❌"
+            )
+
+        elif result == "invalid_quantity":
+            await query.message.reply_text(
+                "تعداد ثبت‌شده برای سفارش نامعتبر است. ❌"
+            )
+
+        else:
+            await query.message.reply_text(
+                "هنگام لغو سفارش خطایی رخ داد. لطفاً دوباره تلاش کنید. ❌"
+            )
+
+        return
+
     
     elif data.startswith("cancel_"):
 
@@ -1396,7 +1619,6 @@ async def button_handler(
         return
 
 
-    
         
 def main():
     token = os.getenv("BOT_TOKEN")
