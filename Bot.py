@@ -1188,54 +1188,71 @@ async def button_handler(
 
         user_id = query.from_user.id
         
+        
         try:
-            success = create_order(
-            user_id,
-            product_id,
-            quantity,
-            confirmation_id
-        )
+            result = create_order(
+                user_id,
+                product_id,
+                quantity,
+                confirmation_id
+            )
 
         except Exception:
             logging.exception("Error while creating order")
-            success = "error"
-        
-        if success == "success":
-           await query.message.reply_text(
-               "خرید شما با موفقیت ثبت شد. ✅"
-           )
+            result = "error"
 
-        elif success == "duplicate":
-           await query.message.reply_text(
-               "این سفارش قبلاً ثبت شده است. ⚠️"
-           )
+        if (
+            isinstance(result, tuple)
+            and len(result) == 2
+            and result[0] == "payment_pending"
+        ):
+            order_id = result[1]
 
-        elif success == "unavailable":
-           await query.message.reply_text(
-               "محصول ناموجود است یا موجودی کافی نیست. ❌"
-           )
+            context.user_data["pending_payment_order_id"] = order_id
 
-        elif success == "invalid_quantity":
+            await query.message.reply_text(
+                f"سفارش شما با شماره {order_id} ثبت شد. ✅\n\n"
+                "وضعیت سفارش: در انتظار پرداخت ⏳\n"
+                "مهلت پرداخت: ۱۵ دقیقه\n\n"
+                "در مرحله بعد، امکان پرداخت آزمایشی را اضافه می‌کنیم."
+            )
+
+        elif result == "duplicate":
+            await query.message.reply_text(
+                "این سفارش قبلاً ثبت شده است. ⚠️"
+            )
+
+        elif result == "unavailable":
+            await query.message.reply_text(
+                "محصول ناموجود است یا موجودی کافی نیست. ❌"
+            )
+
+        elif result == "invalid_quantity":
             await query.message.reply_text(
                 "تعداد سفارش نامعتبر است. ❌"
             )
 
-        elif success == "invalid_user_id":
+        elif result == "invalid_user_id":
             await query.message.reply_text(
-            "شناسه کاربری نامعتبر است. ❌"
-        )
+                "شناسه کاربری نامعتبر است. ❌"
+            )
 
-        elif success == "invalid_product_id":
+        elif result == "invalid_product_id":
             await query.message.reply_text(
                 "شناسه محصول نامعتبر است. ❌"
             )
 
-        elif success == "invalid_confirmation_id":
+        elif result == "invalid_confirmation_id":
             await query.message.reply_text(
                 "شناسه تأیید سفارش نامعتبر است. ❌"
             )
 
-        elif success == "error":
+        elif result == "invalid_price":
+            await query.message.reply_text(
+                "قیمت محصول معتبر نیست. لطفاً با پشتیبانی تماس بگیرید. ❌"
+            )
+
+        elif result == "error":
             await query.message.reply_text(
                 "هنگام ثبت سفارش خطایی رخ داد. لطفاً بعداً دوباره تلاش کنید. ❌"
             )
@@ -1244,12 +1261,13 @@ async def button_handler(
         else:
             logging.error(
                 "Unexpected create_order result: %r",
-                success
+                result
             )
             await query.message.reply_text(
-                "نتیجه ثبت سفارش نامشخص است. لطفاً بعداً دوباره تلاش کنید. ❌"
+                "نتیجه ثبت سفارش نامشخص است. لطفاً با پشتیبانی تماس بگیرید. ❌"
             )
             return
+
         
         context.user_data.pop("pending_order_product_id", None)
         context.user_data.pop("pending_order_quantity", None)
@@ -1275,7 +1293,8 @@ async def button_handler(
 
         if data == "admin_orders_active":
             selected_orders = [
-                order for order in orders if order[7] == "active"
+                order for order in orders
+                if order[7] in ("active", "pending_payment")
             ]
             title = "🟢 سفارش‌های فعال"
 
@@ -1303,6 +1322,13 @@ async def button_handler(
                 status
             ) = order
 
+            if status == "pending_payment":
+                status_label = "در انتظار پرداخت ⏳"
+            elif status == "active":
+                status_label = "فعال 🟢"
+            else:
+                status_label = "لغوشده ❌"
+
             message = (
                 f"🆔 شناسه سفارش: {order_id}\n"
                 f"👤 شناسه کاربر: {user_id}\n"
@@ -1311,10 +1337,10 @@ async def button_handler(
                 f"🔢 تعداد: {quantity}\n"
                 f"💵 مبلغ کل: {total_price:,} تومان\n"
                 f"🕒 تاریخ ثبت: {created_at}\n"
-                f"📌 وضعیت سفارش: {'فعال' if status == 'active' else 'لغوشده'}"
+                f"📌 وضعیت: {status_label}"
             )
 
-            if status == "active":
+            if status in ("active", "pending_payment"):
                 keyboard = [[
                     InlineKeyboardButton(
                         text="❌ لغو سفارش",
@@ -1365,6 +1391,13 @@ async def button_handler(
                 order_status
             ) = order
 
+            if order_status == "pending_payment":
+                status_label = "در انتظار پرداخت ⏳"
+            elif order_status == "active":
+                status_label = "فعال 🟢"
+            else:
+                status_label = "لغوشده ❌"
+
             message = (
                 f"🧾 شماره سفارش: {order_id}\n"
                 f"📦 محصول: {product_name}\n"
@@ -1372,12 +1405,12 @@ async def button_handler(
                 f"🔢 تعداد: {quantity}\n"
                 f"💵 مبلغ کل: {total_price:,} تومان\n"
                 f"🕒 تاریخ: {created_at}\n"
-                f"📌 وضعیت: {'فعال 🟢' if order_status == 'active' else 'لغوشده ❌'}"
+                f"📌 وضعیت: {status_label}"
             )
 
             reply_markup = None
 
-            if order_status == "active":
+            if order_status in ("active", "pending_payment"):
                 keyboard = [[
                     InlineKeyboardButton(
                         "❌ لغو سفارش",
@@ -1434,6 +1467,39 @@ async def button_handler(
             await query.edit_message_reply_markup(reply_markup=None)
             await query.message.reply_text("این سفارش قبلاً لغو شده است.")
 
+        elif result == "payment_already_paid":
+            await query.edit_message_reply_markup(reply_markup=None)
+            await query.message.reply_text(
+                "⛔ پرداخت این سفارش انجام شده یا نیازمند بررسی است؛ "
+                "لغو عادی امکان‌پذیر نیست."
+            )
+
+        elif result == "payment_not_found":
+            await query.edit_message_reply_markup(reply_markup=None)
+            await query.message.reply_text(
+                "⚠️ رکورد پرداخت این سفارش پیدا نشد. "
+                "لطفاً سفارش را بررسی کنید."
+            )
+
+        elif result == "payment_uncertain":
+            await query.edit_message_reply_markup(reply_markup=None)
+            await query.message.reply_text(
+                "⚠️ وضعیت پرداخت هنوز مشخص نیست. "
+                "موجودی سفارش همچنان رزرو است و باید بررسی شود."
+            )
+
+        elif result == "payment_review":
+            await query.edit_message_reply_markup(reply_markup=None)
+            await query.message.reply_text(
+                "⛔ این سفارش نیازمند بررسی پرداخت است و فعلاً قابل لغو نیست."
+            )
+
+        elif result == "invalid_payment_status":
+            await query.edit_message_reply_markup(reply_markup=None)
+            await query.message.reply_text(
+                "⛔ وضعیت پرداخت نامعتبر است؛ سفارش نیازمند بررسی است."
+            )
+
         elif result == "not_found":
             await query.edit_message_reply_markup(reply_markup=None)
             await query.message.reply_text("سفارش موردنظر پیدا نشد.")
@@ -1443,11 +1509,6 @@ async def button_handler(
                 "شناسه سفارش نامعتبر است. ❌"
             )
 
-        elif result == "product_not_found":
-            await query.edit_message_reply_markup(reply_markup=None)
-            await query.message.reply_text(
-                "⛔ محصول این سفارش در دیتابیس پیدا نشد؛ موجودی بازنگشت."
-            )
 
         elif result == "invalid_status":
             await query.edit_message_reply_markup(reply_markup=None)
@@ -1464,6 +1525,15 @@ async def button_handler(
         elif result == "error":
             await query.message.reply_text(
                 "هنگام لغو سفارش خطایی رخ داد. لطفاً دوباره تلاش کنید. ❌"
+            )
+
+        else:
+            logging.error(
+                "Unexpected admin cancel_order result: %r",
+                result
+            )
+            await query.message.reply_text(
+                "نتیجه لغو سفارش مشخص نیست؛ لطفاً سفارش را بررسی کنید."
             )
         
         return
@@ -1515,6 +1585,52 @@ async def button_handler(
                 "این سفارش قبلاً لغو شده است."
             )
 
+        elif result == "payment_already_paid":
+            await query.edit_message_reply_markup(
+                reply_markup=None
+            )
+            await query.message.reply_text(
+                "⛔ پرداخت این سفارش انجام شده یا نیازمند بررسی است. "
+                "برای پیگیری با پشتیبانی تماس بگیرید."
+            )
+
+        elif result == "payment_not_found":
+            await query.edit_message_reply_markup(
+                reply_markup=None
+            )
+            await query.message.reply_text(
+                "⚠️ اطلاعات پرداخت سفارش پیدا نشد. "
+                "لطفاً با پشتیبانی تماس بگیرید."
+            )
+
+        elif result == "payment_uncertain":
+            await query.edit_message_reply_markup(
+                reply_markup=None
+            )
+            await query.message.reply_text(
+                "⚠️ وضعیت پرداخت هنوز مشخص نیست. "
+                "موجودی سفارش همچنان رزرو است. "
+                "لطفاً برای پیگیری با پشتیبانی تماس بگیرید."
+            )
+
+        elif result == "payment_review":
+            await query.edit_message_reply_markup(
+                reply_markup=None
+            )
+            await query.message.reply_text(
+                "⛔ سفارش شما نیازمند بررسی وضعیت پرداخت است "
+                "و فعلاً امکان لغو آن وجود ندارد."
+            )
+
+        elif result == "invalid_payment_status":
+            await query.edit_message_reply_markup(
+                reply_markup=None
+            )
+            await query.message.reply_text(
+                "⛔ وضعیت پرداخت سفارش نامعتبر است. "
+                "لطفاً با پشتیبانی تماس بگیرید."
+            )
+
         elif result in ("not_found", "unauthorized"):
             await query.edit_message_reply_markup(
                 reply_markup=None
@@ -1526,14 +1642,6 @@ async def button_handler(
         elif result in ("invalid_order_id", "invalid_user_id"):
             await query.message.reply_text(
                 "اطلاعات سفارش نامعتبر است. ❌"
-            )
-
-        elif result == "product_not_found":
-            await query.edit_message_reply_markup(
-                reply_markup=None
-            )
-            await query.message.reply_text(
-                "محصول سفارش در دیتابیس پیدا نشد؛ موجودی بازنگشت. ❌"
             )
 
         elif result == "invalid_status":
