@@ -1203,12 +1203,14 @@ async def button_handler(
 
         if (
             isinstance(result, tuple)
-            and len(result) == 2
+            and len(result) == 3
             and result[0] == "payment_pending"
         ):
             order_id = result[1]
+            payment_id = result[2]
 
             context.user_data["pending_payment_order_id"] = order_id
+            context.user_data["pending_payment_id"] = payment_id
 
             await query.message.reply_text(
                 f"سفارش شما با شماره {order_id} ثبت شد. ✅\n\n"

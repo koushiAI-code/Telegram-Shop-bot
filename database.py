@@ -296,6 +296,119 @@ def get_test_payment_result(payment_id):
     finally:
         connection.close()
 
+def get_payment_by_id(payment_id):
+
+    if type(payment_id) is not int or payment_id <= 0:
+        return "invalid_payment_id"
+
+    connection = connect_db()
+
+    try:
+        cursor = connection.cursor()
+
+        cursor.execute("""
+            SELECT
+                id,
+                order_id,
+                amount,
+                currency,
+                gateway,
+                transaction_id,
+                status
+            FROM payments
+            WHERE id = ?
+        """, (payment_id,))
+
+        payment = cursor.fetchone()
+
+        if payment is None:
+            return "payment_not_found"
+
+        return {
+            "id": payment[0],
+            "order_id": payment[1],
+            "amount": payment[2],
+            "currency": payment[3],
+            "gateway": payment[4],
+            "transaction_id": payment[5],
+            "status": payment[6]
+        }
+
+    finally:
+        connection.close()
+
+def save_payment_transaction_id(payment_id, transaction_id):
+
+    if type(payment_id) is not int or payment_id <= 0:
+        return "invalid_payment_id"
+
+    if (
+        not isinstance(transaction_id, str)
+        or not transaction_id.strip()
+    ):
+        return "invalid_transaction_id"
+
+    transaction_id = transaction_id.strip()
+
+    connection = connect_db()
+
+    try:
+        cursor = connection.cursor()
+
+        cursor.execute("BEGIN IMMEDIATE")
+
+        cursor.execute("""
+            SELECT transaction_id, status
+            FROM payments
+            WHERE id = ?
+        """, (payment_id,))
+
+        payment = cursor.fetchone()
+
+        if payment is None:
+            connection.rollback()
+            return "payment_not_found"
+
+        current_transaction_id, status = payment
+
+        if status != "pending":
+            connection.rollback()
+            return "payment_not_pending"
+
+        if current_transaction_id == transaction_id:
+            connection.rollback()
+            return "already_saved"
+
+        if current_transaction_id is not None:
+            connection.rollback()
+            return "transaction_id_conflict"
+
+        cursor.execute("""
+            UPDATE payments
+            SET transaction_id = ?
+            WHERE id = ?
+            AND transaction_id IS NULL
+            AND status = 'pending'
+        """, (transaction_id, payment_id))
+
+        if cursor.rowcount != 1:
+            connection.rollback()
+            return "transaction_id_conflict"
+
+        connection.commit()
+        return "success"
+
+    except sqlite3.IntegrityError:
+        connection.rollback()
+        return "transaction_id_already_used"
+
+    except sqlite3.Error:
+        connection.rollback()
+        raise
+
+    finally:
+        connection.close()
+
 def process_payment_result(
     payment_id,
     result,
@@ -588,7 +701,6 @@ def process_payment_result(
             if order_status not in (
                 "pending_payment",
                 "payment_review",
-                "cancelled"
             ):
                 connection.rollback()
                 return "invalid_order_status"
@@ -614,6 +726,8 @@ def process_payment_result(
             product_missing = False
 
             # آزادسازی موجودی فقط یک بار
+            
+
             if stock_released == 0:
 
                 cursor.execute("""
@@ -630,6 +744,7 @@ def process_payment_result(
                     status = 'cancelled',
                     stock_released = 1
                 WHERE id = ?
+                AND status IN ('pending_payment', 'payment_review')
             """, (order_id,))
 
             cursor.execute("""
@@ -1036,8 +1151,11 @@ def create_order(user_id, product_id, quantity, confirmation_id):
             "pending"
         ))
 
+        payment_id = cursor.lastrowid
+
         connection.commit()
-        return ("payment_pending", order_id)
+
+        return ("payment_pending", order_id, payment_id)
 
     except sqlite3.Error:
         connection.rollback()
